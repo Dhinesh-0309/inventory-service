@@ -1,0 +1,178 @@
+name: Inventory Service CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  test-and-analyze:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. Checkout ─────────────────────────────────────────────────────────
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ── 2. Python setup ─────────────────────────────────────────────────────
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      # ── 3. Install dependencies ──────────────────────────────────────────────
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # ── 4. Run tests → JUnit XML ─────────────────────────────────────────────
+      # We always produce the XML even when tests fail (continue-on-error)
+      # so Flakeless can analyze the failures.
+      - name: Run test suite
+        id: run_tests
+        continue-on-error: true
+        run: |
+          pytest tests/ \
+            --junitxml=test-results.xml \
+            -v \
+            2>&1 | tee test-output.log
+          echo "EXIT_CODE=${PIPESTATUS[0]}" >> $GITHUB_ENV
+
+      # ── 5. Flakeless ML — analyze failures ───────────────────────────────────
+      # Runs always, even when tests fail.
+      # Produces a structured JSON analysis report.
+      - name: Flakeless ML — analyze CI failures
+        if: always()
+        run: |
+          pip install requests 2>/dev/null || true
+
+          python3 - <<'PYEOF'
+          import json, os, sys, xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          xml_path = "test-results.xml"
+          if not Path(xml_path).exists():
+              print("No test results found — skipping Flakeless analysis")
+              sys.exit(0)
+
+          # Parse JUnit XML
+          tree = ET.parse(xml_path)
+          root = tree.getroot()
+          suites = root.findall(".//testsuite") or [root]
+
+          failures = []
+          total, failed = 0, 0
+
+          for suite in suites:
+              for tc in suite.findall("testcase"):
+                  total += 1
+                  f = tc.find("failure")
+                  e = tc.find("error")
+                  if f is not None or e is not None:
+                      failed += 1
+                      node = f if f is not None else e
+                      name = tc.get("name", "")
+                      cls  = tc.get("classname", "")
+                      msg  = node.get("message", "")
+                      body = node.text or ""
+                      # Simple heuristic classification
+                      # (mirrors what the ML model would do with history)
+                      full_text = (msg + " " + body).lower()
+                      if any(k in full_text for k in
+                             ["timeout", "timed out", "latency", "slow", "cache miss"]):
+                          assessment = "LIKELY FLAKY"
+                          priority   = "P2"
+                          reason     = (
+                              "Error message contains timing/latency keywords. "
+                              "Pattern consistent with intermittent infrastructure failure. "
+                              "Recommend re-running to confirm reproducibility."
+                          )
+                      elif any(k in full_text for k in
+                               ["assertionerror", "404", "not found",
+                                "renamed", "removed", "contract changed",
+                                "schema changed", "missing from"]):
+                          assessment = "POTENTIAL REGRESSION"
+                          priority   = "P1"
+                          reason     = (
+                              "Error message indicates an API contract or "
+                              "schema violation. Pattern consistent with a "
+                              "breaking code change. Review recent commits."
+                          )
+                      else:
+                          assessment = "INSUFFICIENT EVIDENCE"
+                          priority   = "P3"
+                          reason     = (
+                              "Not enough context to classify reliably. "
+                              "Check run history and recent commits."
+                          )
+
+                      failures.append({
+                          "test_id":    f"{cls}::{name}",
+                          "assessment": assessment,
+                          "priority":   priority,
+                          "reason":     reason,
+                          "error_msg":  msg[:300],
+                      })
+
+          report = {
+              "run_id":       os.environ.get("GITHUB_RUN_ID", "local"),
+              "sha":          os.environ.get("GITHUB_SHA", "unknown")[:7],
+              "branch":       os.environ.get("GITHUB_REF_NAME", "unknown"),
+              "total_tests":  total,
+              "failed_tests": failed,
+              "passed_tests": total - failed,
+              "failures":     failures,
+              "outcome_summary": {
+                  "LIKELY FLAKY":         sum(1 for f in failures if f["assessment"] == "LIKELY FLAKY"),
+                  "POTENTIAL REGRESSION": sum(1 for f in failures if f["assessment"] == "POTENTIAL REGRESSION"),
+                  "INSUFFICIENT EVIDENCE":sum(1 for f in failures if f["assessment"] == "INSUFFICIENT EVIDENCE"),
+              },
+          }
+
+          Path("flakeless-report.json").write_text(json.dumps(report, indent=2))
+
+          print()
+          print("=" * 60)
+          print("FLAKELESS ML — CI ANALYSIS")
+          print("=" * 60)
+          print(f"Build:   {report['sha']} on {report['branch']}")
+          print(f"Tests:   {total} total  |  {failed} failed  |  {total-failed} passed")
+          print()
+          if failures:
+              for f in failures:
+                  print(f"  [{f['priority']}] {f['assessment']}")
+                  print(f"       {f['test_id']}")
+                  print(f"       {f['reason']}")
+                  print()
+          else:
+              print("  All tests passed — no failures to analyze.")
+          print("=" * 60)
+          PYEOF
+
+      # ── 6. Upload artifacts ──────────────────────────────────────────────────
+      - name: Upload test results and Flakeless report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flakeless-ci-report-${{ github.run_number }}
+          path: |
+            test-results.xml
+            test-output.log
+            flakeless-report.json
+          retention-days: 30
+
+      # ── 7. Preserve original CI status ──────────────────────────────────────
+      # Flakeless analysis NEVER masks a real failure.
+      # If tests failed, the build fails — full stop.
+      - name: Enforce original test status
+        if: always()
+        run: |
+          if [ "${{ steps.run_tests.outcome }}" = "failure" ]; then
+            echo ""
+            echo "BUILD FAILED: Test suite reported failures."
+            echo "Flakeless ML analysis is available in the artifacts."
+            echo "A failure classified as LIKELY FLAKY still requires investigation."
+            exit 1
+          fi
+          echo "All tests passed."
