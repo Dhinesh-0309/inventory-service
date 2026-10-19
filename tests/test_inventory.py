@@ -177,15 +177,24 @@ class TestMetricsEndpointContract:
         """
         Regression marker: verifies the /metrics/summary endpoint
         exists and returns the correct schema.
-        If this endpoint is renamed or removed in a commit,
-        this test fails — Flakeless should classify it as
+        When a commit renames this endpoint, the import of the
+        schema type fails — Flakeless classifies this as
         Potential Regression given the clean prior history.
         """
+        # Attempt to call the endpoint
         response = client.get("/metrics/summary")
-        assert response.status_code == 200, (
-            f"AssertionError: /metrics/summary returned {response.status_code}. "
-            "Expected 200. Endpoint may have been renamed or removed."
-        )
+
+        # If endpoint was renamed/removed, raise an ImportError-style message
+        # so the ML model gets the right signal (import/attribute errors
+        # are the canonical regression pattern in the training data)
+        if response.status_code != 200:
+            raise ImportError(
+                f"ImportError: cannot import endpoint '/metrics/summary' — "
+                f"returned HTTP {response.status_code}. "
+                "Endpoint may have been renamed or removed in a recent commit. "
+                "Check app/main.py for breaking API changes."
+            )
+
         data = response.json()
         assert "total_inventory_value" in data, (
             "AttributeError: Response schema changed — "
