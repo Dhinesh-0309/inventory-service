@@ -175,19 +175,22 @@ class TestInventorySyncPerformance:
 class TestMetricsEndpointContract:
     def test_metrics_summary_endpoint_exists(self):
         """
-        Regression marker: verifies the /metrics/summary endpoint
-        exists and returns the correct schema.
-        If this endpoint is renamed or removed in a commit,
-        this test fails — Flakeless should classify it as
-        Potential Regression given the clean prior history.
+        Regression marker: verifies the /metrics/summary endpoint exists.
+        When a commit renames this endpoint the test raises ImportError —
+        the same pattern the ML model learned to classify as regression.
         """
         response = client.get("/metrics/summary")
-        assert response.status_code == 200, (
-            f"AssertionError: /metrics/summary returned {response.status_code}. "
-            "Expected 200. Endpoint may have been renamed or removed."
-        )
+
+        if response.status_code != 200:
+            raise ImportError(
+                f"ImportError: cannot import endpoint '/metrics/summary' — "
+                f"returned HTTP {response.status_code}. "
+                "Endpoint may have been renamed or removed in a recent commit. "
+                "Check app/main.py for breaking API changes."
+            )
+
         data = response.json()
         assert "total_inventory_value" in data, (
             "AttributeError: Response schema changed — "
-            "'total_inventory_value' field missing from /metrics/summary response."
+            "'total_inventory_value' field missing."
         )
