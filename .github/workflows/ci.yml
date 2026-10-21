@@ -23,69 +23,17 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # Run tests. Save real exit code to a file.
-      # NO continue-on-error — we handle failure ourselves at the end.
-      - name: Run test suite
+      - name: Run tests
         run: |
           set +e
           pytest tests/ --junitxml=test-results.xml -v 2>&1 | tee test-output.log
           echo ${PIPESTATUS[0]} > .pytest_exit
           exit 0
 
-      # Flakeless ML — always runs, reads real JUnit XML, produces report
-      - name: Flakeless ML — analyze failures
+      - name: Flakeless ML analysis
         if: always()
-        run: |
-          [ -f test-results.xml ] || { echo "No test results."; exit 0; }
-          python3 - <<'EOF'
-import json, os, xml.etree.ElementTree as ET
-from pathlib import Path
+        run: python3 .github/flakeless_analyze.py
 
-root   = ET.parse("test-results.xml").getroot()
-suites = root.findall(".//testsuite") or [root]
-failures, total, failed = [], 0, 0
-
-for suite in suites:
-    for tc in suite.findall("testcase"):
-        total += 1
-        fn = tc.find("failure") or tc.find("error")
-        if fn is None:
-            continue
-        failed += 1
-        msg  = fn.get("message", "")
-        text = (msg + " " + (fn.text or "")).lower()
-        if any(k in text for k in ["timeout","timed out","cache miss","latency","slow"]):
-            p, a = "P2", "LIKELY FLAKY"
-            r = "Timing/latency error — pattern consistent with intermittent failure."
-        elif any(k in text for k in ["importerror","cannot import","attributeerror","404","renamed","removed"]):
-            p, a = "P1", "POTENTIAL REGRESSION"
-            r = "Import or attribute error — pattern consistent with a breaking code change."
-        else:
-            p, a = "P3", "INSUFFICIENT EVIDENCE"
-            r = "Not enough context. Check history and recent commits."
-        failures.append({"test_id": f"{tc.get('classname','')}::{tc.get('name','')}",
-                         "priority": p, "assessment": a, "reason": r, "error_msg": msg[:300]})
-
-report = {"run_id": os.environ.get("GITHUB_RUN_ID","local"),
-          "sha": os.environ.get("GITHUB_SHA","unknown")[:7],
-          "branch": os.environ.get("GITHUB_REF_NAME","unknown"),
-          "total_tests": total, "failed_tests": failed, "passed_tests": total-failed,
-          "failures": failures}
-Path("flakeless-report.json").write_text(json.dumps(report, indent=2))
-
-print("\n" + "="*55)
-print("  FLAKELESS ML — CI ANALYSIS")
-print("="*55)
-print(f"  Commit : {report['sha']}  Branch: {report['branch']}")
-print(f"  Tests  : {total} total | {failed} failed | {total-failed} passed\n")
-for f in failures:
-    print(f"  [{f['priority']}]  {f['assessment']}")
-    print(f"        {f['test_id']}")
-    print(f"        {f['reason']}\n")
-print("="*55)
-EOF
-
-      # Upload artifacts — even on failure
       - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -97,14 +45,12 @@ EOF
             flakeless-report.json
           retention-days: 30
 
-      # Fail the build if tests actually failed.
-      # This is what makes GitHub show RED.
       - name: Fail if tests failed
         if: always()
         run: |
           EXIT=$(cat .pytest_exit 2>/dev/null || echo 0)
           if [ "$EXIT" != "0" ]; then
-            echo "TESTS FAILED — marking build as RED."
+            echo "TESTS FAILED — build is RED."
             exit 1
           fi
           echo "All tests passed."
