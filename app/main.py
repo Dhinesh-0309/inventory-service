@@ -100,7 +100,7 @@ def stock_status(item_id: int):
     return {"item_id": item_id, "quantity": item["quantity"], "level": level}
 
 
-@app.get("/metrics/summary")
+@app.get("/metrics/overview")
 def metrics_summary():
     items = list(_inventory.values())
     total = len(items)
