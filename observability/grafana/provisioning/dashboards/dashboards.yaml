@@ -1,0 +1,10 @@
+apiVersion: 1
+providers:
+  - name: Observable Order Platform
+    orgId: 1
+    folder: Application
+    type: file
+    disableDeletion: true
+    editable: true
+    options:
+      path: /var/lib/grafana/dashboards

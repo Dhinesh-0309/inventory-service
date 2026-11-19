@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101b2d">
+  <title>Observable Order Platform | Playground</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Observable Order Platform home"><span class="brand-mark">O</span><span>Observable Order Platform</span></a>
+    <nav aria-label="Observability tools">
+      <a href="http://localhost:3000" target="_blank" rel="noreferrer">Grafana <span>↗</span></a>
+      <a href="http://localhost:16686" target="_blank" rel="noreferrer">Jaeger <span>↗</span></a>
+      <a href="/prometheus/graph" target="_blank" rel="noreferrer">Prometheus <span>↗</span></a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow"><span class="pulse"></span> LOCAL OBSERVABILITY LAB</p>
+        <h1>Break something.<br><em>Follow the evidence.</em></h1>
+        <p class="intro">Explore what happens to an order as it moves from the Java Orders service to the Python Inventory service. Run a scenario here, then inspect its metrics and trace.</p>
+        <div class="flow" aria-label="Request flow"><span>YOU</span><b>→</b><span class="service-java">ORDERS <small>Java</small></span><b>→</b><span class="service-python">INVENTORY <small>Python</small></span></div>
+      </div>
+      <aside class="guide-card">
+        <p class="eyebrow">YOUR INVESTIGATION</p>
+        <ol><li><span>1</span> Choose an experiment</li><li><span>2</span> Run an order</li><li><span>3</span> Compare metrics and trace</li></ol>
+        <p class="hint">Experiments reset injected delay or failure after each request.</p>
+      </aside>
+    </section>
+
+    <section class="workspace">
+      <div class="section-heading"><div><p class="eyebrow">01 / CHOOSE A SCENARIO</p><h2>What should happen?</h2></div><span class="step-label">One request per experiment</span></div>
+      <div class="scenarios" role="group" aria-label="Choose experiment scenario">
+        <button class="scenario selected" data-scenario="normal" aria-pressed="true"><span class="scenario-icon mint">↗</span><span><strong>Healthy order</strong><small>Normal request through both services</small></span><span class="radio"></span></button>
+        <button class="scenario" data-scenario="reject" aria-pressed="false"><span class="scenario-icon amber">!</span><span><strong>Not enough stock</strong><small>Business rejection, not an outage</small></span><span class="radio"></span></button>
+        <button class="scenario" data-scenario="slow" aria-pressed="false"><span class="scenario-icon violet">◷</span><span><strong>Slow Inventory</strong><small>Add a 900 ms dependency delay</small></span><span class="radio"></span></button>
+        <button class="scenario" data-scenario="fail" aria-pressed="false"><span class="scenario-icon red">×</span><span><strong>Inventory unavailable</strong><small>See the downstream error reach Orders</small></span><span class="radio"></span></button>
+        <button class="scenario" data-scenario="model-low" aria-pressed="false"><span class="scenario-icon mint">↓</span><span><strong>Lower model risk</strong><small>High stock, short lead time</small></span><span class="radio"></span></button>
+        <button class="scenario" data-scenario="model-high" aria-pressed="false"><span class="scenario-icon amber">↑</span><span><strong>Higher model risk</strong><small>Low stock, long lead time</small></span><span class="radio"></span></button>
+      </div>
+
+      <div class="section-heading inputs-heading"><div><p class="eyebrow">02 / ADJUST THE INPUTS</p><h2>Order and model inputs</h2></div><button class="text-button" id="reset-inputs">Restore example values</button></div>
+      <form id="order-form">
+        <div class="fields">
+          <label>Product SKU<input name="sku" value="SKU-42" maxlength="64" required></label>
+          <label>Order quantity<input name="quantity" type="number" min="1" max="10000" value="2" required><small>SKU-42 has 80 demo units</small></label>
+          <label>Daily demand<input name="dailyDemand" type="number" min="0" max="10000" step="0.1" value="8"></label>
+          <label>Units on hand<input name="onHand" type="number" min="0" max="100000" step="0.1" value="40"></label>
+          <label>Supplier lead time (days)<input name="leadDays" type="number" min="0" max="365" step="0.1" value="4"></label>
+          <label>Demand volatility<input name="demandVolatility" type="number" min="0.1" max="10" step="0.1" value="2"></label>
+        </div>
+        <div class="run-row"><p id="scenario-note">A normal order should be accepted. Use this as your baseline.</p><button class="run-button" id="run-button" type="submit"><span>Run experiment</span><b>→</b></button></div>
+      </form>
+    </section>
+
+    <section class="results" aria-live="polite">
+      <div class="result-main"><div class="section-heading"><div><p class="eyebrow">03 / OBSERVE THE RESULT</p><h2>What did the services report?</h2></div><span class="result-badge idle" id="result-badge">READY</span></div>
+        <div class="response-box" id="response-box"><div class="empty-mark">↳</div><div><strong>Your result will appear here</strong><p>Run an experiment to see the order response and the next clues to investigate.</p></div></div>
+        <div class="observe-next" id="observe-next"><strong>Where to look next</strong><p id="observe-copy">After the request completes, open its trace in Jaeger and compare it with the service metrics in Grafana.</p><div class="tool-links"><a href="http://localhost:16686/search?service=orders&lookback=1h" target="_blank" rel="noreferrer">Find recent Orders traces <b>↗</b></a><a href="http://localhost:3000" target="_blank" rel="noreferrer">Open the Grafana dashboard <b>↗</b></a></div></div>
+      </div>
+      <aside class="metrics-card"><p class="eyebrow">LIVE COUNTERS <span class="live-dot"></span></p><h3>Business outcomes</h3><p class="metrics-help">Read from Prometheus. Refreshes after each experiment.</p><div class="metric-row"><span>Accepted orders</span><strong id="accepted-count">—</strong></div><div class="metric-row"><span>Rejected orders</span><strong id="rejected-count">—</strong></div><div class="metric-row"><span>Model predictions</span><strong id="prediction-count">—</strong></div><p class="metric-foot" id="metrics-state">Waiting for the first scrape…</p></aside>
+    </section>
+
+    <section class="concepts"><div><p class="eyebrow">THE THREE SIGNALS</p><h2>Use each tool for a different question.</h2></div><div class="concept-grid"><article><span class="concept-no">01</span><h3>Metrics</h3><p>Prometheus and Grafana show whether a pattern is changing across many requests.</p></article><article><span class="concept-no">02</span><h3>Traces</h3><p>Jaeger shows the steps and time spent on one request as it crosses services.</p></article><article><span class="concept-no">03</span><h3>Health</h3><p>Readiness checks tell you whether each service is ready to handle work.</p></article></div></section>
+  </main>
+  <footer><span>Built for learning · Runs locally with Docker Compose</span><span>Telemetry is evidence. Follow it before guessing.</span></footer>
+  <script src="/app.js" defer></script>
+</body>
+</html>
